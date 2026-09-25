@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Political Unrest — Free HTML Demos</title>
+<meta name="description" content="PG-13 political satire FPS. Free browser prototypes — race to 270, tweets as ammo. Kickstarter funds the Unreal vertical slice.">
+<style>
+  :root {
+    --bg: #0b0f14;
+    --bg2: #121821;
+    --card: #171e2a;
+    --ink: #eef3fa;
+    --muted: #93a0b4;
+    --line: #2a3548;
+    --gold: #e8b84a;
+    --gop: #d14949;
+    --dem: #3d7aef;
+    --radius: 14px;
+    --shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  .bg-glow {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(ellipse at 18% 25%, rgba(61,122,239,.22), transparent 50%),
+      radial-gradient(ellipse at 82% 20%, rgba(209,73,73,.18), transparent 48%),
+      radial-gradient(ellipse at 50% 90%, rgba(232,184,74,.08), transparent 55%);
+  }
+  .wrap {
+    position: relative; z-index: 1;
+    width: min(780px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 56px 0 64px;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--gold); font-weight: 700; margin-bottom: 12px;
+  }
+  h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(1.85rem, 5vw, 2.6rem);
+    line-height: 1.15; margin: 0 0 14px; letter-spacing: -0.02em;
+  }
+  h1 span { color: var(--gold); }
+  .lede { color: var(--muted); font-size: 1.05rem; margin: 0 0 28px; max-width: 36rem; }
+  .lede strong { color: var(--ink); }
+  .play-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+  @media (max-width: 560px) {
+    .play-grid { grid-template-columns: 1fr; }
+  }
+  .play-btn {
+    display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+    gap: 6px;
+    padding: 28px 22px;
+    border-radius: var(--radius);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    background: linear-gradient(160deg, var(--card), #10151e);
+    box-shadow: var(--shadow);
+    transition: transform .15s ease, border-color .15s ease;
+    min-height: 140px;
+  }
+  .play-btn:hover { transform: translateY(-2px); border-color: var(--gold); }
+  .play-btn .tag {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+    font-weight: 700; color: var(--gold);
+  }
+  .play-btn .title {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.35rem; color: var(--ink); font-weight: 700;
+  }
+  .play-btn .sub { font-size: 0.88rem; color: var(--muted); }
+  .play-btn.dem-edge { border-left: 3px solid var(--dem); }
+  .play-btn.gop-edge { border-left: 3px solid var(--gop); }
+  .note {
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .note strong { color: var(--ink); }
+  footer {
+    margin-top: 36px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  footer a { color: var(--gold); }
+</style>
+</head>
+<body>
+<div class="bg-glow" aria-hidden="true"></div>
+<main class="wrap">
+  <div class="eyebrow">Free browser prototypes · PG-13 satire FPS</div>
+  <h1>Political <span>Unrest</span> — Free HTML Demos</h1>
+  <p class="lede">
+    Race to <strong>270</strong>. Tweets are ammo. Clear the rally, flip the state, don’t get ratio’d.
+    These are <strong>living pitch prototypes</strong> you can play in any modern browser —
+    Kickstarter funds the <strong>Unreal vertical slice</strong>, not a slide deck.
+  </p>
+
+  <div class="play-grid">
+    <a class="play-btn dem-edge" href="PoliticalUnrest.html">
+      <span class="tag">▶ Play now</span>
+      <span class="title">Play 2D Prototype</span>
+      <span class="sub">Classic top-down satire FPS · PoliticalUnrest.html</span>
+    </a>
+    <a class="play-btn gop-edge" href="PoliticalUnrest3D.html">
+      <span class="tag">▶ Play now</span>
+      <span class="title">Play 3D Prototype</span>
+      <span class="sub">WebGL 3D pitch build · PoliticalUnrest3D.html</span>
+    </a>
+  </div>
+
+  <div class="note">
+    <strong>Browser prototypes / pitch proof.</strong>
+    No Epic Games Launcher. No Unreal Engine install. No paid gate.
+    Backing the campaign funds the commercial Unreal path (vertical slice, Steam, closed beta).
+    The HTML demos stay free for everyone.
+  </div>
+
+  <footer>
+    © Warren Williams · Archon ops · PG-13 comedy satire · stylized characters, not photoreal likenesses
+  </footer>
+</main>
+</body>
+</html>

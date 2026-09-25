@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Political Unrest — Archon Ops (2D)</title>
+<style>
+:root{--red:#c41e3a;--blue:#1d4ed8;--gold:#f5c542;--bg:#0b0d12;--panel:#161b22}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:#eee;font-family:Georgia,"Times New Roman",serif;overflow:hidden}
+#wrap{display:flex;flex-direction:column;height:100%}
+header{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#141820;border-bottom:2px solid #2a3140;gap:8px;flex-wrap:wrap}
+header h1{margin:0;font-size:13px;letter-spacing:1px}
+header h1 .r{color:var(--red)} header h1 .b{color:var(--blue)}
+#hud{display:flex;gap:10px;font-size:11px;font-family:Consolas,monospace;flex-wrap:wrap}
+#hud b{color:var(--gold)}
+#ticker{width:100%;font-size:10px;color:#9ab;font-family:Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#stage{flex:1;position:relative;min-height:0}
+canvas{display:block;width:100%;height:100%;background:#1a1f18}
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(8,10,14,.94);z-index:20}
+#overlay.hidden{display:none!important}
+.panel{width:min(580px,94vw);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid #3a4254;padding:20px 16px 14px}
+.panel h2{margin:0 0 8px;font-size:22px}
+.panel p{color:#c8cdd8;line-height:1.4;margin:0 0 10px;font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button{background:#222833;color:#fff;border:1px solid #4a5568;padding:10px 12px;cursor:pointer;font:600 13px Georgia,serif;border-radius:8px}
+button.gop{background:#7a1224;border-color:#e05}
+button.dem{background:#163a8a;border-color:#4c8dff}
+button.ghost{background:transparent}
+button:disabled{opacity:.4;cursor:default}
+#toast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);background:#111c;padding:8px 14px;border:1px solid #445;pointer-events:none;z-index:15;font-size:13px}
+#help{position:fixed;right:8px;top:48px;background:rgba(0,0,0,.55);border:1px solid #445;padding:6px 8px;font:11px Consolas,monospace;z-index:10;line-height:1.45;max-width:200px}
+#help.hidden{display:none}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1><span class="r">POLITICAL UNREST</span> · <span class="b">ARCHON OPS</span></h1>
+    <div id="hud">
+      <span>Team:<b id="hTeam">—</b></span>
+      <span>State:<b id="hState">—</b></span>
+      <span>HP:<b id="hHp">100</b></span>
+      <span>Shield:<b id="hShield">0</b>s</span>
+      <span>Paper:<b id="hPaper">0</b></span>
+      <span>Score:<b id="hScore">0</b></span>
+      <span>EV:<b id="hEv">0</b>/270</span>
+      <span>Boss:<b id="hBoss">—</b></span>
+      <span>Ammo:<b id="hAmmo">TWEET</b></span>
+    </div>
+    <div id="ticker">STATUS: satire mode · no real threats</div>
+  </header>
+  <div id="stage"><canvas id="game" width="1100" height="640"></canvas></div>
+</div>
+<div id="overlay"></div>
+<div id="toast" hidden></div>
+<div id="help" class="hidden">
+  <b>CONTROLS</b><br>WASD / arrows move<br>Mouse aim · Click / Space tweet<br>Q grenade · F smoke<br>P pause · R restart · H help<br>Esc menu
+</div>
+<script>
+(() => {
+/* ===== CONFIG (Forge + Synapse + Census) ===== */
+const CFG = {
+  NEED: 270,
+  BOSS_HP: 400,
+  STAFF_HP_MIN: 35, STAFF_HP_MAX: 45,
+  STAFF_CLEAR: 1, // win when boss dead AND staffAlive <= this
+  BACKFIRE_RATE: 0.2, // 1:5
+  PITY_CLEAN: 4, // soft pity after 4 clean hits
+  SHIELD_SECS: 8,
+  SHIELD_CD: 20, // Synapse ~20s between shields
+  PAPER_STRONG: 3,
+  PROTEST_WARN: 3,
+  PROTEST_PUNISH: 4,
+  FORGIVE_SECS: 8, // −1 HitsFromPlayer / 8s out of combat
+  STRONG_DMG: [40,55],
+  TWEET_DMG: [12,18],
+  PLAYER_HP: 100,
+  PLAYER_SPEED: 3.6,
+};
+const STATES = [
+  {id:"TX", name:"TEXAS", ev:40},
+  {id:"FL", name:"FLORIDA", ev:30},
+  {id:"PA", name:"PENNSYLVANIA", ev:19},
+  {id:"MI", name:"MICHIGAN", ev:15},
+  {id:"WI", name:"WISCONSIN", ev:10},
+];
+/* EV source: National Archives (2020 Census allocation, 2024/2028) */
+const NOVA = {
+  gop: ["Taxes up. Freedom down. Classic.","Green new deal? More like green new bills.","Borders aren't suggestions, folks.","That mandate flopped harder than expected.","Gas prices vote too, apparently.","Fact-check this: common sense won.","Bureaucracy ate another small business.","Soft-on-crime soft-on-your-wallet.","Inflation isn't a vibe. It's math.","Defunded? Your street noticed.","Energy independence wasn't optional.","School board mic drop incoming.","Red tape thicker than the plot.","They taxed the tip of the iceberg.","Regulations: infinite. Results: pending.","Another hearing, same talking points.","Freedom of speech includes disagreement.","That poll just ratioed itself.","Jobs didn't leave for vibes.","Mandate theater got bad reviews."],
+  dem: ["Rights aren't a seasonal special.","Climate isn't waiting for midterms.","Healthcare isn't a luxury brand.","Democracy needs more than slogans.","That cut hit working families first.","Science called. Policy hung up.","Equality isn't radical. Denial is.","Polling places beat polling takes.","Fact-check your nostalgia, carefully.","Budgets show priorities. Yours show.","Voting access isn't optional DLC.","That speech needed a receipt.","Workers built it. Credit pending.","Soft denial, hard consequences.","Public schools aren't punching bags.","Silence isn't neutrality. It's a choice.","Reform beats rhetoric. Try both.","Your timeline isn't the census.","Compassion and competence can coexist.","That ratio wrote itself."],
+  headlines: ["LOCAL POLL FLIPS AFTER MEME STORM","TOWN HALL DRAWS RECORD SNACK BUDGET","RIVAL CAMPS TRADE HASHTAGS, NOT HANDSHAKES","COUNTY FAIR HOSTS SURPRISE DEBATE REMATCH","VIRAL CLIP SENDS BOTH SIDES FUNDRAISING","EDITORIAL BOARD ENDORSES \"MAYBE CALM DOWN\"","SCHOOL BOARD MEETING HITS TRENDING #3","FACT-CHECK DESK HIRES EXTRA COFFEE","MIDWEEK RALLY MOVES TO LARGER PARKING LOT","OPINION PAGE: EVERYONE SOMEWHAT WRONG"],
+  ticker: ["POLL: 51–49… confidence interval: chaos","VIRAL: opposing clip nails same joke","RATIO ALERT: dunk depleted both tanks","TRENDING: #BothSidesOfTheSnackTable","LIVE: debate scoreboard stuck on vibes","BREAKING-ISH: endorsement from a podcast","METRICS: likes up, nuance down","STATUS: satire mode · no real threats"],
+  backfire: ["RATIO'D!","OWN GOAL!","SUBTWEET FAIL!","QUOTE-TWEET DISASTER!"]
+};
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const toastEl = document.getElementById("toast");
+const helpEl = document.getElementById("help");
+const W = canvas.width, H = canvas.height;
+const keys = {};
+const mouse = {x:W/2,y:H/2,down:false};
+
+let mode = "menu"; // menu | play | pause | win | lose | whitehouse
+let team = 0; // 0 GOP 1 DEM
+let mapId = "RallyField";
+let fightState = null;
+let campaign = STATES.map(s => ({...s, owner:null}));
+let evBank = [0, 0]; // accumulating EV — rematch adds; race to 270
+let player, enemies, bullets, orbs, particles, smokes, floaters;
+let score, fireCool, grenCool, smokeCool, boss, shake, t, spawnTimer, protestTimer, paperTimer;
+let cleanTweets = 0, lastWasBackfire = false;
+let protestForgive = 0, euUnlocked = false;
+let protestResetUsed = false, euRecoverUsed = false, shieldCD = 0;
+let tickerIdx = 0, tickerTimer = 0;
+let pause = false;
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+function irand(a,b){ return (a + Math.random()*(b-a+1))|0; }
+function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+function ang(a,b){ return Math.atan2(b.y-a.y,b.x-a.x); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function pick(arr){ return arr[(Math.random()*arr.length)|0]; }
+function toast(msg){ toastEl.hidden=false; toastEl.textContent=msg; clearTimeout(toastEl._t); toastEl._t=setTimeout(()=>toastEl.hidden=true,2400); }
+function evCount(side){ return evBank[side]|0; }
+function caption(side, st){ return (side===0?"GOP TAKES ":"DEM TAKES ") + st.name; }
+
+window.addEventListener("keydown", e => {
+  keys[e.code]=true;
+  if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+  if(e.code==="KeyP" && mode==="play"){ pause=!pause; toast(pause?"PAUSED — P to resume":"RESUMED"); }
+  if(e.code==="KeyR" && (mode==="play"||mode==="pause")){ if(fightState) startFight(team, fightState, mapId); }
+  if(e.code==="KeyH"){ helpEl.classList.toggle("hidden"); }
+  if(e.code==="Escape"){ showMenu(); }
+});
+window.addEventListener("keyup", e => { keys[e.code]=false; });
+function canvasPos(cx,cy){ const r=canvas.getBoundingClientRect(); return {x:(cx-r.left)*(W/Math.max(1,r.width)), y:(cy-r.top)*(H/Math.max(1,r.height))}; }
+canvas.addEventListener("pointerdown", e => { if(mode!=="play") return; const p=canvasPos(e.clientX,e.clientY); mouse.x=p.x; mouse.y=p.y; mouse.down=true; });
+canvas.addEventListener("pointermove", e => { const p=canvasPos(e.clientX,e.clientY); mouse.x=p.x; mouse.y=p.y; });
+canvas.addEventListener("pointerup", () => { mouse.down=false; });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+function showMenu(){
+  mode="menu"; pause=false; overlay.classList.remove("hidden"); helpEl.classList.add("hidden");
+  const g=evCount(0), d=evCount(1);
+  const cells = campaign.map(s=>{
+    const col=s.owner===0?"#7a1224":s.owner===1?"#163a8a":"#2a3140";
+    const tag=s.owner===0?" GOP":s.owner===1?" DEM":"";
+    return `<button data-st="${s.id}" style="background:${col};min-width:88px">${s.id} · ${s.ev} EV${tag}</button>`;
+  }).join("");
+  overlay.innerHTML = `<div class="panel">
+    <h2>POLITICAL UNREST</h2>
+    <p>Sci-fi ops under <b>Archon</b>. Tweet combat satire — PG-13, no gore, no real threats. First to <b>${CFG.NEED}</b> EV wins the White House.</p>
+    <p><span style="color:#ff6b7a">GOP ${g}</span> · <span style="color:#7eb6ff">DEM ${d}</span> · Need ${CFG.NEED}</p>
+    <p style="font-size:12px">EV source: National Archives 2020 Census allocation (2024/2028): TX40 FL30 PA19 MI15 WI10. Rematch states — EV accumulates toward 270.</p>
+    <p>1) Pick team · 2) Pick map · 3) Pick a state (rematch OK)</p>
+    <div class="row" style="margin-bottom:8px">
+      <button class="gop" id="setGop">GOP</button>
+      <button class="dem" id="setDem">DEM</button>
+      <button class="ghost" id="mapRally">${mapId==="RallyField"?"✓ ":""}RallyField</button>
+      <button class="ghost" id="mapProtest">${mapId==="ProtestStreets"?"✓ ":""}ProtestStreets</button>
+    </div>
+    <p>Team: <b id="teamLab">${team===0?"GOP":"DEM"}</b> · Map: <b id="mapLab">${mapId}</b> · Boss: <b>${team===0?"BIDEN":"TRUMP"}</b></p>
+    <div class="row" id="stateGrid">${cells}</div>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="resetCamp">Reset campaign</button>
+      <button class="ghost" id="showHelp">Controls</button>
+    </div>
+    <p style="font-size:11px;margin-top:8px;color:#889">WASD move · Click/Space tweet · Q grenade · F smoke · P pause · R restart · H help</p>
+  </div>`;
+  document.getElementById("setGop").onclick=()=>{ team=0; showMenu(); };
+  document.getElementById("setDem").onclick=()=>{ team=1; showMenu(); };
+  document.getElementById("mapRally").onclick=()=>{ mapId="RallyField"; showMenu(); };
+  document.getElementById("mapProtest").onclick=()=>{ mapId="ProtestStreets"; showMenu(); };
+  document.getElementById("resetCamp").onclick=()=>{ campaign.forEach(s=>s.owner=null); evBank=[0,0]; euUnlocked=false; showMenu(); };
+  document.getElementById("showHelp").onclick=()=>{ helpEl.classList.remove("hidden"); };
+  overlay.querySelectorAll("[data-st]").forEach(btn=>{
+    btn.onclick=()=>{
+      const s=campaign.find(x=>x.id===btn.dataset.st);
+      if(!s) return;
+      startFight(team, s, mapId);
+    };
+  });
+}
+
+function startFight(side, st, map){
+  team=side; fightState=st; mapId=map;
+  mode="play"; pause=false;
+  overlay.classList.add("hidden"); helpEl.classList.remove("hidden");
+  score=0; t=0; shake=0; fireCool=0; grenCool=0; smokeCool=0; boss=null;
+  spawnTimer=30; protestTimer=90; paperTimer=180;
+  cleanTweets=0; lastWasBackfire=false;
+  protestForgive=0; protestResetUsed=false; euRecoverUsed=false; shieldCD=0;
+  enemies=[]; bullets=[]; orbs=[]; particles=[]; smokes=[]; floaters=[];
+  player={x:W/2,y:H-100,r:16,hp:CFG.PLAYER_HP,max:CFG.PLAYER_HP,shieldT:0,paper:0,speed:CFG.PLAYER_SPEED,team,name:team===0?"GOP OPS":"DEM OPS"};
+  // seed staff
+  for(let i=0;i<6;i++) spawnStaff();
+  spawnProtester();
+  spawnBoss();
+  toast(`${team===0?"GOP":"DEM"} ops in ${st.name} — clear staff, drop the boss`);
+  updateHUD();
+}
+
+function spawnStaff(){
+  const foe=1-team;
+  const hp=irand(CFG.STAFF_HP_MIN, CFG.STAFF_HP_MAX);
+  enemies.push({
+    x:rand(60,W-60), y:rand(60,H*0.45), r:14, hp, max:hp,
+    speed:rand(1.1,1.8), team:foe, name:"STAFF", fire:rand(50,120),
+    boss:false, protest:false, kind:"staff"
+  });
+}
+function spawnBoss(){
+  const foe=1-team;
+  const name=foe===1?"BIDEN":"TRUMP";
+  boss={x:W/2,y:90,r:28,hp:CFG.BOSS_HP,max:CFG.BOSS_HP,speed:0.9,team:foe,name,fire:40,boss:true,protest:false,kind:"boss"};
+  enemies.push(boss);
+  toast(team===0?"BIDEN HAS ENTERED THE ARENA":"TRUMP TAKES THE STREET");
+}
+function spawnProtester(){
+  enemies.push({
+    x:rand(80,W-80), y:rand(H*0.35,H*0.7), r:13, hp:9999, max:9999,
+    speed:0.7, team:-1, name:"PROTESTER", fire:9999,
+    boss:false, protest:true, kind:"protest", HitsFromPlayer:0, punished:false
+  });
+}
+function dropOrb(x,y,force){
+  const r=Math.random();
+  let kind="life";
+  if(force) kind=force;
+  else if(r<0.34) kind="life";
+  else if(r<0.67) kind="shield";
+  else kind="paper";
+  const headline = kind==="paper" ? pick(NOVA.headlines) : null;
+  orbs.push({x,y,r:10,kind,life:480,headline});
+}
+function addFloater(x,y,text,col){
+  floaters.push({x,y,text,col:col||"#fff",life:90,vy:-0.6});
+}
+function fireTweet(from, angle, strong){
+  const lines = from.team===0 ? NOVA.gop : NOVA.dem;
+  const text = pick(lines);
+  let dmg = strong ? irand(CFG.STRONG_DMG[0],CFG.STRONG_DMG[1]) : irand(CFG.TWEET_DMG[0],CFG.TWEET_DMG[1]);
+  let backfire = 0;
+  if(from===player){
+    let chance = CFG.BACKFIRE_RATE;
+    if(lastWasBackfire) chance = 0; // pity: no double
+    if(cleanTweets >= CFG.PITY_CLEAN) chance *= 0.35; // soft pity
+    if(Math.random() < chance){
+      backfire = 14; // telegraph frames then reverse
+      lastWasBackfire = true; cleanTweets = 0;
+      toast(pick(NOVA.backfire)+" — TWEET BACKFIRE / RATIO");
+    } else {
+      lastWasBackfire = false; cleanTweets++;
+    }
+  }
+  const speed = strong ? 7.2 : 5.5;
+  bullets.push({
+    x:from.x+Math.cos(angle)*from.r, y:from.y+Math.sin(angle)*from.r,
+    vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
+    r: strong?9:7, dmg, team:from.team, life:90, kind: strong?"strong":"tweet",
+    backfire, text, fromPlayer: from===player
+  });
+  addFloater(from.x, from.y-20, text.slice(0,28), from.team===0?"#ff8a9a":"#8ab4ff");
+}
+function fireGrenade(from, angle){
+  const speed=4.2;
+  bullets.push({x:from.x,y:from.y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,r:11,dmg:28,team:from.team,life:40,kind:"gren",backfire:0,text:"Q!",fromPlayer:from===player});
+}
+function hurtPlayer(dmg){
+  if(player.shieldT>0){ /* shield absorbs */ return; }
+  player.hp -= dmg;
+  shake=8;
+  if(player.hp<=0){ player.hp=0; showLose(); }
+}
+function updateHUD(){
+  document.getElementById("hTeam").textContent = team===0?"GOP":"DEM";
+  document.getElementById("hState").textContent = fightState?fightState.id:"—";
+  document.getElementById("hHp").textContent = Math.max(0,player?player.hp|0:100);
+  document.getElementById("hShield").textContent = player?Math.ceil(player.shieldT):0;
+  document.getElementById("hPaper").textContent = player?player.paper:0;
+  document.getElementById("hScore").textContent = score|0;
+  document.getElementById("hEv").textContent = evCount(team);
+  document.getElementById("hBoss").textContent = boss && boss.hp>0 ? (boss.name+" "+(boss.hp|0)) : "DOWN";
+  document.getElementById("hAmmo").textContent = player&&player.paper>0 ? ("STRONG×"+player.paper) : "TWEET";
+  tickerTimer++;
+  if(tickerTimer%180===0){ tickerIdx=(tickerIdx+1)%NOVA.ticker.length; document.getElementById("ticker").textContent=NOVA.ticker[tickerIdx]; }
+}
+
+function showWin(){
+  mode="win";
+  const winner=team;
+  if(fightState){
+    fightState.owner=winner;
+    evBank[winner]=(evBank[winner]|0)+fightState.ev; // accumulates on rematch
+  }
+  const g=evCount(0), d=evCount(1);
+  const title=caption(winner, fightState);
+  let whitehouse = (g>=CFG.NEED && winner===0) || (d>=CFG.NEED && winner===1);
+  overlay.classList.remove("hidden");
+  if(whitehouse){
+    overlay.innerHTML=`<div class="panel"><h2>${winner===0?"GOP WINS THE WHITE HOUSE":"DEM WINS THE WHITE HOUSE"}</h2>
+      <p>${title}</p><p>GOP ${g} EV · DEM ${d} EV</p>
+      <div class="row"><button id="again">Campaign map</button><button class="ghost" id="reset">New election</button></div></div>`;
+  } else {
+    overlay.innerHTML=`<div class="panel"><h2>${title}</h2>
+      <p>+${fightState.ev} electoral votes. GOP ${g} · DEM ${d} · Need ${CFG.NEED}</p>
+      ${euUnlocked?'<p style="color:#f5c542">EU_Unlocked — protester optics card in play (satire).</p>':''}
+      <div class="row"><button id="again">Next state</button><button class="ghost" id="replay">Replay state</button></div></div>`;
+  }
+  document.getElementById("again").onclick=showMenu;
+  const r=document.getElementById("replay"); if(r) r.onclick=()=>startFight(team,fightState,mapId);
+  const rst=document.getElementById("reset"); if(rst) rst.onclick=()=>{campaign.forEach(s=>s.owner=null);evBank=[0,0];showMenu();};
+}
+function showLose(){
+  mode="lose"; overlay.classList.remove("hidden");
+  overlay.innerHTML=`<div class="panel"><h2>OUT OF THE NEWS CYCLE</h2>
+    <p>HP hit zero in ${fightState?fightState.name:"the arena"}. Satire over — try again.</p>
+    <div class="row"><button id="retry">Retry</button><button class="ghost" id="map">Campaign map</button></div></div>`;
+  document.getElementById("retry").onclick=()=>startFight(team,fightState,mapId);
+  document.getElementById("map").onclick=showMenu;
+}
+
+function update(){
+  if(mode!=="play"||pause||!player) return;
+  t++; fireCool=Math.max(0,fireCool-1); grenCool=Math.max(0,grenCool-1); smokeCool=Math.max(0,smokeCool-1); shake=Math.max(0,shake-1);
+  shieldCD=Math.max(0,shieldCD-1);
+  if(player.shieldT>0) player.shieldT=Math.max(0, player.shieldT-1/60);
+
+  // movement
+  let mx=0,my=0;
+  if(keys["KeyW"]||keys["ArrowUp"]) my-=1;
+  if(keys["KeyS"]||keys["ArrowDown"]) my+=1;
+  if(keys["KeyA"]||keys["ArrowLeft"]) mx-=1;
+  if(keys["KeyD"]||keys["ArrowRight"]) mx+=1;
+  if(mx||my){ const L=Math.hypot(mx,my); mx/=L; my/=L; }
+  player.x=clamp(player.x+mx*player.speed,20,W-20);
+  player.y=clamp(player.y+my*player.speed,20,H-20);
+
+  const aim = ang(player, mouse);
+
+  // fire
+  if((mouse.down||keys["Space"]) && fireCool===0){
+    const strong = player.paper>0;
+    if(strong) player.paper--;
+    fireTweet(player, aim, strong);
+    fireCool = strong ? 10 : 14;
+  }
+  if(keys["KeyQ"] && grenCool===0){ fireGrenade(player, aim); grenCool=90; toast("GRENADE OUT"); }
+  if(keys["KeyF"] && smokeCool===0){
+    smokes.push({x:player.x+Math.cos(aim)*60, y:player.y+Math.sin(aim)*60, r:32, life:240});
+    smokeCool=130; toast("SMOKE SCREEN");
+  }
+
+  // spawn
+  spawnTimer--; protestTimer--; paperTimer--;
+  const staffAlive = enemies.filter(e=>e.kind==="staff"&&e.hp>0).length;
+  if(staffAlive<5 && spawnTimer<=0 && boss && boss.hp>0){ spawnStaff(); spawnTimer=70; }
+  if(protestTimer<=0 && !enemies.some(e=>e.protest&&e.hp>0)){ spawnProtester(); protestTimer=300; }
+  if(paperTimer<=0 && orbs.filter(o=>o.kind==="paper").length<2){ dropOrb(rand(80,W-80), rand(80,H-80), "paper"); paperTimer=irand(270,320); }
+
+  // Synapse: forgive −1 HitsFromPlayer / ~8s out of combat
+  const anyHits = enemies.some(e=>e.protest && (e.HitsFromPlayer|0)>0 && !e.punished);
+  if(anyHits){
+    protestForgive++;
+    if(protestForgive > CFG.FORGIVE_SECS*60){
+      protestForgive=0;
+      for(const e of enemies){
+        if(e.protest && !e.punished && (e.HitsFromPlayer|0)>0) e.HitsFromPlayer--;
+      }
+    }
+  } else protestForgive=0;
+
+  function inSmoke(ent){ return smokes.some(s=>dist(s,ent)<s.r); }
+  for(const s of smokes){ s.life--; s.r=Math.min(70,s.r+0.15); }
+  smokes=smokes.filter(s=>s.life>0);
+
+  // enemies AI
+  for(const e of enemies){
+    if(e.hp<=0) continue;
+    if(e.protest){
+      // wander near mid, avoid player a bit
+      e.x+=Math.cos(t/40+e.x)*e.speed*0.4;
+      e.y+=Math.sin(t/50+e.y)*e.speed*0.4;
+      e.x=clamp(e.x,40,W-40); e.y=clamp(e.y,40,H-40);
+      continue;
+    }
+    if(inSmoke(e)) continue;
+    const target=player;
+    const a=ang(e,target);
+    e.x+=Math.cos(a)*e.speed; e.y+=Math.sin(a)*e.speed;
+    e.x=clamp(e.x,30,W-30); e.y=clamp(e.y,30,H-30);
+    e.fire--;
+    if(e.fire<=0 && dist(e,player)<420){
+      fireTweet(e, a+rand(-0.15,0.15), false);
+      e.fire = e.boss ? 32 : irand(55,110);
+    }
+    if(dist(e,player)<e.r+player.r+2){ hurtPlayer(e.boss?0.35:0.18); }
+  }
+
+  // bullets
+  for(const b of bullets){
+    if(b.backfire>0){
+      b.backfire--;
+      if(b.backfire===0){ b.vx*=-1; b.vy*=-1; b.team=1-b.team; b.text=pick(NOVA.backfire); }
+    }
+    b.x+=b.vx; b.y+=b.vy; b.life--;
+    if(b.kind==="gren" && b.life<=2){
+      // splash
+      for(const e of enemies){
+        if(e.hp<=0||e.team===b.team||e.protest) continue;
+        if(dist(b,e)<55) hitEnemy(e,b.dmg,b);
+      }
+      burst(b.x,b.y,"#f5c542",16); b.life=0;
+    }
+    // hit player
+    if(b.team!==player.team && dist(b,player)<b.r+player.r){ hurtPlayer(b.dmg*0.35); b.life=0; burst(b.x,b.y,"#fff",6); }
+    // hit enemies
+    for(const e of enemies){
+      if(e.hp<=0||e.team===b.team) continue;
+      if(dist(b,e)<b.r+e.r){ hitEnemy(e,b.dmg,b); b.life=0; break; }
+    }
+  }
+  bullets=bullets.filter(b=>b.life>0 && b.x>-20&&b.x<W+20&&b.y>-20&&b.y<H+20);
+
+  // orbs
+  for(const o of orbs){
+    o.life--;
+    if(dist(o,player)<o.r+player.r+4){
+      if(o.kind==="life"){
+        player.hp=Math.min(player.max, player.hp+28); toast("+LIFE");
+        if(euUnlocked && !euRecoverUsed){ euRecoverUsed=true; euUnlocked=false; toast("Partial EU recover via Life"); }
+      }
+      if(o.kind==="shield"){
+        if(shieldCD>0){ toast("Shield on cooldown ("+Math.ceil(shieldCD/60)+"s)"); }
+        else {
+          player.shieldT=CFG.SHIELD_SECS; shieldCD=CFG.SHIELD_CD*60; toast("TEMP SHIELD (8s)");
+          // Synapse: help/shield can reset HitsFromPlayer once
+          if(!protestResetUsed){
+            protestResetUsed=true;
+            for(const e of enemies){ if(e.protest && !e.punished) e.HitsFromPlayer=0; }
+            toast("Shield clears protester hit count (once)");
+          }
+        }
+      }
+      if(o.kind==="paper"){
+        player.paper+=CFG.PAPER_STRONG; toast((o.headline||"PAPER")+" — 3 STRONG TWEETS");
+        if(euUnlocked && !euRecoverUsed){ euRecoverUsed=true; euUnlocked=false; toast("Partial EU recover via Paper"); }
+      }
+      burst(o.x,o.y,o.kind==="shield"?"#7ecbff":"#5ee07a",10);
+      o.life=0;
+    }
+  }
+  orbs=orbs.filter(o=>o.life>0);
+
+  for(const f of floaters){ f.y+=f.vy; f.life--; }
+  floaters=floaters.filter(f=>f.life>0);
+  for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; }
+  particles=particles.filter(p=>p.life>0);
+
+  // win check
+  const staffLeft = enemies.filter(e=>e.kind==="staff"&&e.hp>0).length;
+  if(boss && boss.hp<=0 && staffLeft<=CFG.STAFF_CLEAR){ showWin(); }
+
+  updateHUD();
+}
+
+function hitEnemy(e, dmg, bullet){
+  if(e.protest){
+    // Design bible: HitsFromPlayer +1 only when YOUR Tweet hits them
+    const isPlayerTweet = bullet && bullet.fromPlayer && (bullet.kind==="tweet"||bullet.kind==="strong");
+    if(isPlayerTweet && !e.punished){
+      e.HitsFromPlayer = (e.HitsFromPlayer|0)+1;
+      protestForgive = 0; // in combat — reset forgive clock
+      if(e.HitsFromPlayer < CFG.PROTEST_PUNISH){
+        toast(`Don't farm protesters! warn ${e.HitsFromPlayer}/${CFG.PROTEST_WARN}`);
+      }
+      if(e.HitsFromPlayer >= CFG.PROTEST_PUNISH){
+        e.punished = true;
+        player.hp = Math.max(1, Math.floor(player.hp/2));
+        euUnlocked = true;
+        toast("4 hits — Health halved + EU_Unlocked");
+        shake=14;
+      }
+    }
+    burst(e.x,e.y,"#aaa",8);
+    return;
+  }
+  e.hp -= dmg;
+  burst(e.x,e.y,"#f5c542",8);
+  if(bullet && bullet.text) addFloater(e.x, e.y-16, bullet.text.slice(0,22), "#ffe08a");
+  if(e.hp<=0){
+    score += e.boss ? 250 : 18;
+    dropOrb(e.x,e.y);
+    burst(e.x,e.y,"#f5c542",18);
+    if(e.boss){ boss.hp=0; toast("BOSS DOWN — clear remaining staff!"); }
+  }
+}
+function burst(x,y,col,n){
+  for(let i=0;i<n;i++) particles.push({x,y,vx:rand(-3,3),vy:rand(-3,3),life:irand(12,28),col});
+}
+
+function drawMap(){
+  if(mapId==="RallyField"){
+    ctx.fillStyle="#2d4a28"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#3a5c34";
+    for(let i=0;i<8;i++) ctx.fillRect(40+i*130, H-70, 90, 40);
+    // stage / podium
+    ctx.fillStyle="#5a4632"; ctx.fillRect(W/2-160,40,320,70);
+    ctx.fillStyle="#c9a86c"; ctx.fillRect(W/2-40,70,80,30);
+    ctx.fillStyle="#888"; ctx.fillRect(80,60,30,80); ctx.fillRect(W-110,60,30,80); // speakers
+    ctx.fillStyle="#444"; // barricades
+    for(let i=0;i<6;i++) ctx.fillRect(100+i*150, H*0.55, 60, 12);
+  } else {
+    ctx.fillStyle="#2a2a2e"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#1f1f22";
+    for(let i=0;i<5;i++){ ctx.fillRect(20+i*220,30,160,120); ctx.fillRect(60+i*220,H-160,140,100); }
+    ctx.fillStyle="#f5c542"; // yellow police barricades
+    for(let i=0;i<7;i++){ ctx.fillRect(60+i*140, H*0.5, 70, 10); ctx.fillRect(60+i*140, H*0.5+10, 10, 18); ctx.fillRect(120+i*140, H*0.5+10, 10, 18); }
+    ctx.fillStyle="#3d4a5c"; ctx.fillRect(W/2-50, H*0.62, 100, 55); // van box
+    ctx.fillStyle="#222"; ctx.fillRect(W/2-40, H*0.64, 30, 22); ctx.fillRect(W/2+10, H*0.64, 30, 22);
+  }
+}
+
+function drawPerson(ent, col){
+  ctx.save();
+  ctx.translate(ent.x,ent.y);
+  if(ent.protest){
+    ctx.fillStyle="#666"; ctx.beginPath(); ctx.arc(0,0,ent.r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#ddd"; ctx.font="9px Georgia"; ctx.textAlign="center"; ctx.fillText("P",0,3);
+    // sign
+    ctx.fillStyle="#eee"; ctx.fillRect(-10,-ent.r-18,20,12);
+  } else {
+    ctx.fillStyle=col;
+    ctx.beginPath(); ctx.arc(0,0,ent.r,0,Math.PI*2); ctx.fill();
+    if(ent.boss){ ctx.strokeStyle=varGold(); ctx.lineWidth=3; ctx.stroke(); }
+    ctx.fillStyle="#fff"; ctx.font=ent.boss?"12px Georgia":"9px Georgia"; ctx.textAlign="center";
+    ctx.fillText(ent.name.slice(0,6),0,4);
+  }
+  // hp bar
+  if(!ent.protest && ent.hp<ent.max){
+    const w=ent.boss?70:32;
+    ctx.fillStyle="#222"; ctx.fillRect(-w/2,-ent.r-10,w,5);
+    ctx.fillStyle=col; ctx.fillRect(-w/2,-ent.r-10,w*(ent.hp/ent.max),5);
+  }
+  ctx.restore();
+}
+function varGold(){ return "#f5c542"; }
+
+function draw(){
+  ctx.save();
+  if(shake){ ctx.translate(rand(-shake,shake), rand(-shake,shake)); }
+  drawMap();
+  for(const s of smokes){
+    ctx.fillStyle="rgba(180,180,180,0.25)";
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+  }
+  for(const o of orbs){
+    ctx.fillStyle=o.kind==="shield"?"#7ecbff":o.kind==="paper"?"#e8d48b":"#5ee07a";
+    ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#111"; ctx.font="9px Consolas"; ctx.textAlign="center";
+    ctx.fillText(o.kind==="shield"?"SH":o.kind==="paper"?"📰":"+", o.x, o.y+3);
+    if(o.kind==="paper"&&o.headline){
+      ctx.fillStyle="#e8d48b"; ctx.font="8px Georgia";
+      ctx.fillText(o.headline.slice(0,28), o.x, o.y-14);
+    }
+  }
+  for(const e of enemies){ if(e.hp>0) drawPerson(e, e.team===0?"#c41e3a":e.team===1?"#1d4ed8":"#888"); }
+  if(player){
+    drawPerson(player, team===0?"#c41e3a":"#1d4ed8");
+    if(player.shieldT>0){
+      ctx.strokeStyle="rgba(126,203,255,0.7)"; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(player.x,player.y,player.r+6,0,Math.PI*2); ctx.stroke();
+    }
+  }
+  for(const b of bullets){
+    ctx.fillStyle=b.backfire>0?"#f5c542":(b.team===0?"#ff6b7a":"#7eb6ff");
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#111"; ctx.font="8px Consolas"; ctx.textAlign="center";
+    ctx.fillText(b.backfire>0?"?":(b.kind==="gren"?"Q":"T"), b.x, b.y+3);
+  }
+  for(const p of particles){ ctx.fillStyle=p.col; ctx.fillRect(p.x,p.y,3,3); }
+  for(const f of floaters){
+    ctx.globalAlpha=clamp(f.life/90,0,1);
+    ctx.fillStyle=f.col; ctx.font="11px Georgia"; ctx.textAlign="center";
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.globalAlpha=1;
+  }
+  if(pause){
+    ctx.fillStyle="rgba(0,0,0,0.45)"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#fff"; ctx.font="28px Georgia"; ctx.textAlign="center";
+    ctx.fillText("PAUSED", W/2, H/2);
+  }
+  ctx.restore();
+}
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+showMenu();
+loop();
+})();
+</script>
+</body>
+</html>
